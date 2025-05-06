@@ -1,0 +1,847 @@
+---
+title: "Modello Statistico per la Previsione del Peso
+ Neonatale"
+author: "Martina Alba Argento"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, echo = TRUE, results = "hide" }
+# Import the dataset
+data <- read.csv("neonati.csv")
+
+# View the structure of the dataset to examine variable types and initial values
+str(data)
+
+# Attach the dataset to access variables directly by name
+attach(data)
+```
+
+```{r}
+# Convert categorical variables into factors directly within the dataset
+data$Tipo.parto <- as.factor(data$Tipo.parto)
+data$Ospedale <- as.factor(data$Ospedale)
+data$Sesso <- as.factor(data$Sesso)
+data$Fumatrici <- as.factor(data$Fumatrici)
+
+# Rename the levels of the 'Fumatrici' variable for better readability
+levels(data$Fumatrici) <- c("Non Fumatrice", "Fumatrice")
+
+# Display summary statistics for all variables
+summary(data)
+
+```
+
+```{r, message = FALSE, warning = FALSE}
+library(knitr)
+library(kableExtra)
+```
+```{r}
+# Check for outlier values in the variable "Anni.madre"
+data[data$Anni.madre < 15 | data$Anni.madre > 50, "Anni.madre"]
+
+# Remove implausible values for maternal age (<15 years)
+data <- data[data$Anni.madre >= 15, ]
+
+# Summarize statistics for the cleaned variable
+summary_anni_madre <- summary(data$Anni.madre)
+
+# Convert the summary output to a data frame and round values to 2 decimal places
+summary_anni_madre_df <- data.frame(
+  Statistica = c("Minimum", "First Quartile", "Median", "Mean", "Third Quartile", "Maximum"),
+  Valore = round(as.numeric(summary_anni_madre), 2)
+)
+
+# Display the summary table formatted with kableExtra
+kable(summary_anni_madre_df, col.names = c("Statistic", "Value"),
+      caption = "Descriptive statistics for maternal age") %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+
+```
+
+
+L'analisi preliminare ha evidenziato valori anomali per l'età delle madri (<15 anni), che sono stati esclusi per garantire la qualità del dataset.
+
+## Analisi e Modellizzazione
+
+### 1. Analisi preliminare
+
+Esaminiamo inizialmente la distribuzione delle variabili categoriali, seguita dall'analisi delle variabili continue, per comprendere meglio la struttura del dataset.
+
+```{r}
+# Distribution of categorical variables
+tipo_parto_tab <- as.data.frame(table(data$Tipo.parto))
+ospedale_tab <- as.data.frame(table(data$Ospedale))
+sesso_tab <- as.data.frame(table(data$Sesso))
+fumatrici_tab <- as.data.frame(table(data$Fumatrici))
+
+# Formatted and centered tables using kableExtra
+kable(tipo_parto_tab, col.names = c("Delivery Type", "Frequency"), caption = "Distribution of Delivery Type") %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+kable(ospedale_tab, col.names = c("Hospital", "Frequency"), caption = "Distribution of Hospitals") %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+kable(sesso_tab, col.names = c("Sex", "Frequency"), caption = "Distribution of Sex") %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+kable(fumatrici_tab, col.names = c("Smoker", "Frequency"), caption = "Distribution of Smoking Status") %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+
+```
+
+- I dati raccolti sul fumo materno mostrano che solo il 4% delle madri (104 su 2500) fuma, evidenziando una prevalenza molto bassa rispetto al totale analizzato. 
+
+- La maggior parte dei parti (circa il 70%, pari a 1772 su 2500) è stata naturale
+
+- Le distribuzioni relative al sesso dei neonati e agli ospedali di nascita appaiono bilanciate, con una divisione quasi uniforme tra maschi e femmine, così come tra i tre ospedali analizzati. Non si riscontrano anomalie evidenti in queste distribuzioni.
+
+Nel complesso, le variabili categoriche analizzate non mostrano particolari criticità.
+
+
+Proseguiamo con l'analisi delle variabili continue, focalizzandoci su distribuzioni, statistiche descrittive e anomalie per comprendere meglio i dati numerici.
+
+```{r, message = FALSE, warning = FALSE}
+library(ggplot2)
+library(patchwork)
+
+```
+
+```{r}
+binwidths <- c(
+  "Anni.madre" = 1,          # Interval: 1 year
+  "N.gravidanze" = 1,        # Interval: 1 unit
+  "Gestazione" = 1,          # Interval: 1 week
+  "Peso" = 250,              # Interval: 250 grams
+  "Lunghezza" = 10,          # Interval: 10 cm
+  "Cranio" = 5               # Interval: 5 mm
+)
+
+titles <- c(
+  "Anni.madre" = "Mother's Age Distribution",
+  "N.gravidanze" = "Number of Pregnancies Distribution",
+  "Gestazione" = "Gestational Weeks Distribution",
+  "Peso" = "Newborn Weight Distribution",
+  "Lunghezza" = "Newborn Length Distribution",
+  "Cranio" = "Newborn Head Diameter Distribution"
+)
+
+# Loop to create side-by-side plots
+continuous_variables <- names(binwidths)
+for (var in continuous_variables) {
+  # Create histogram
+  histogram <- ggplot(data, aes(x = .data[[var]])) +
+    geom_histogram(binwidth = binwidths[[var]], color = "black", fill = "lightblue") +
+    labs(
+      title = titles[[var]],
+      x = var,
+      y = "Frequency"
+    ) +
+    theme_minimal()
+  
+  # Create boxplot
+  boxplot <- ggplot(data, aes(y = .data[[var]])) +
+    geom_boxplot(color = "black", fill = "orange") +
+    labs(
+      title = paste("Boxplot of", var),
+      y = var
+    ) +
+    theme_minimal()
+  
+  # Display plots side by side using patchwork operator
+  combined_graph <- histogram | boxplot
+  print(combined_graph)
+}
+
+
+```
+
+- La distribuzione dell'età della madre è simile a quella normale, con i dati concentrati tra i 25 e i 32 anni, range che include il primo e il terzo quartile. Il boxplot evidenzia alcuni outlier, situati nella parte alta del grafico, rappresentando valori superiori al limite superiore atteso. 
+
+- Il numero di gravidanze presenta una distribuzione asimmetrica positiva, con una forte concentrazione sul valore 1, come indicato dalla mediana e dal terzo quartile. Il boxplot mostra outlier significativi fino a 12 gravidanze, che, se validi, rappresentano casi meno comuni ma potenzialmente influenti sull’analisi statistica. Questi casi possono fornire informazioni preziose per identificare situazioni cliniche rare.
+
+- Le settimane di gestazione seguono una distribuzione simmetrica, con la maggior parte dei valori compresa tra 30 e 40 settimane, suggerendo una prevalenza di nascite a termine. Alcuni outlier sotto le 30 settimane potrebbero rappresentare nascite premature o errori nei dati, richiedendo ulteriori analisi per confermare la loro validità.
+
+- Il peso dei neonati segue una distribuzione normale, con una media di 3284 grammi. Il boxplot evidenzia outlier sia verso il basso (basso peso alla nascita) sia verso l’alto (peso elevato o errori). Questi outlier sono clinicamente rilevanti, poiché un basso peso alla nascita è un indicatore critico per la salute neonatale e richiede particolare attenzione.
+
+- La lunghezza alla nascita mostra una distribuzione normale, con valori concentrati tra 480 e 510 mm, corrispondenti al primo e terzo quartile. Gli outlier verso il basso potrebbero indicare nascite premature o errori di registrazione, che dovranno essere ulteriormente analizzati.
+
+- Il diametro cranico ha una distribuzione vicina alla normalità, con valori centrali rappresentativi. Gli outlier, concentrati verso il basso, potrebbero riflettere casi specifici o errori di registrazione. Una verifica approfondita è necessaria per valutare l'impatto di questi valori sull'analisi complessiva.
+
+
+Dopo aver analizzato le distribuzioni delle variabili continue, possiamo passare alla verifica delle seguenti ipotesi.
+
+a. *"In alcuni ospedali si verifica una maggiore frequenza di parti cesarei rispetto ad altri."*
+
+Per verificare questa ipotesi, si applica il test di indipendenza chi-quadrato, una tecnica statistica appropriata per analizzare la relazione tra due variabili categoriali. L'obiettivo è determinare se il tipo di parto è distribuito in modo indipendente rispetto all'ospedale.
+
+La procedura è la seguente:
+
+- Creare una tabella di contingenza tra il tipo di parto e l'ospedale.
+
+- Verificare le condizioni di applicabilità del test (valori attesi > 5).
+
+- Applicare il test chi-quadrato e interpretare i risultati.
+
+Questa analisi permetterà di stabilire se la distribuzione dei parti cesarei differisce significativamente tra i vari ospedali.
+
+```{r}
+# Create the contingency table
+contingency_table <- table(Tipo.parto, Ospedale)
+
+# Convert the table into a data frame for better formatting
+contingency_table_df <- as.data.frame.matrix(contingency_table)
+
+# Display the table using kable with a caption and centered layout
+kable(contingency_table_df, caption = "Contingency Table: Type of Delivery and Hospital") %>%
+  kable_styling(full_width = FALSE, position = "center")
+
+```
+
+Procediamo con il test del chi quadrato sulla tabella di contingenza. 
+
+```{r}
+# Perform the Chi-squared test
+chi_sq_result <- chisq.test(contingency_table)
+
+# Print the results in a clean format
+cat(sprintf("Chi-squared test results:\n
+X-squared = %.4f, df = %d, p-value = %.4f",
+            chi_sq_result$statistic,
+            chi_sq_result$parameter,
+            chi_sq_result$p.value))
+```
+Osservando i risultati del test e considerando le seguenti ipotesi del test chi-quadrato:  
+
+- H_0 : Tipo di parto e ospedale sono indipendenti. 
+
+- H_1 : Esiste un'associazione tra tipo di parto e ospedale. 
+
+Poiché il p-value è significativamente maggiore di α=0.05,non vi sono prove sufficienti per rifiutare H_0. Pertanto, concludiamo che non vi è evidenza di una differenza significativa nella distribuzione dei parti cesarei tra i tre ospedali analizzati.
+
+
+b. *"La media del peso e della lunghezza di questo campione di neonati è significativamente uguale a quella della popolazione."*
+
+Per confrontare i dati del campione con quelli della popolazione, e disponendo unicamente dei dati campionari, sono state ricercate informazioni aggiuntive da fonti autorevoli (Ospedale Bambino Gesù), un riferimento importante in ambito neonatale. 
+
+*"Alla nascita viene definito normale un peso compreso tra i 2500 e i 4500 grammi. In media il peso nascita è di circa 3300 grammi, con qualche differenza tra maschi e femmine (i maschi pesano circa 150 grammi in più), mentre non ci sono particolari differenze per quanto riguarda la lunghezza, pari mediamente a 50 centimetri."*
+
+
+Di seguito è riportato il link per reperire tali informazioni.
+
+https://www.ospedalebambinogesu.it/da-0-a-30-giorni-come-si-presenta-e-come-cresce-80012/#.
+
+```{r}
+Peso_popolazione <-  3300
+Lunghezza_popolazione<- 500
+```
+Per comprendere il tipo di test da effettuare verifichiamo la normalità dei dati utilizzando il test di Shapiro-Wilk.
+
+
+```{r}
+# Perform Shapiro-Wilk normality tests
+shapiro_peso <- shapiro.test(data$Peso)
+shapiro_lunghezza <- shapiro.test(data$Lunghezza)
+
+# Display the test results with formatted output
+cat(sprintf(
+  "Shapiro-Wilk Normality Test Results:\n\n
+1. Peso (Weight):\n
+   - W statistic = %.4f\n
+   - p-value = %.2e\n\n
+2. Lunghezza (Length):\n
+   - W statistic = %.4f\n
+   - p-value = %.2e\n",
+   shapiro_peso$statistic, shapiro_peso$p.value,
+   shapiro_lunghezza$statistic, shapiro_lunghezza$p.value
+))
+
+```
+
+Poiché i dati di peso e lunghezza non seguono una distribuzione normale (p-value < 0.05 nel test di Shapiro-Wilk), è necessario utilizzare un test non parametrico, come il test di Wilcoxon, per confrontare le medie.
+
+
+```{r}
+# Wilcoxon Signed-Rank Test
+# Used to compare the sample median to a known population value when the normality assumption is not met
+
+wilcox_peso <- wilcox.test(data$Peso, mu = Peso_popolazione)
+wilcox_lunghezza <- wilcox.test(data$Lunghezza, mu = Lunghezza_popolazione)
+
+# Print the results of the test with formatted output
+cat(sprintf(
+  "Wilcoxon Signed-Rank Test Results:\n\n
+1. Weight:\n
+   - Statistic V = %.0f\n
+   - p-value = %.4f\n
+2. Length:\n
+   - Statistic V = %.0f\n
+   - p-value = %.2e\n",
+   wilcox_peso$statistic, wilcox_peso$p.value,
+   wilcox_lunghezza$statistic, wilcox_lunghezza$p.value
+))
+```
+
+La lunghezza media del campione è significativamente diversa da quella della popolazione (p-value < 0.05), mentre il peso medio non mostra differenze significative (p-value > 0.05)
+
+c. *"Le misure antropometriche sono significativamente diverse tra i due sessi"*
+
+Verifico che i dati siano distribuiti normalmente per poter applicare il test t ed eseguire il confronto. 
+
+```{r}
+# Perform Shapiro-Wilk normality tests for each variable by sex
+shapiro_peso_m <- shapiro.test(data$Peso[data$Sesso == "M"])
+shapiro_peso_f <- shapiro.test(data$Peso[data$Sesso == "F"])
+shapiro_lunghezza_m <- shapiro.test(data$Lunghezza[data$Sesso == "M"])
+shapiro_lunghezza_f <- shapiro.test(data$Lunghezza[data$Sesso == "F"])
+shapiro_cranio_m <- shapiro.test(data$Cranio[data$Sesso == "M"])
+shapiro_cranio_f <- shapiro.test(data$Cranio[data$Sesso == "F"])
+
+# Print formatted results
+cat(sprintf(
+  "Shapiro-Wilk Normality Test Results:\n\n
+1. Weight:\n
+   - Males:\n
+     * W statistic = %.4f\n
+     * p-value = %.2e\n
+   - Females:\n
+     * W statistic = %.4f\n
+     * p-value = %.2e\n\n
+2. Length:\n
+   - Males:\n
+     * W statistic = %.4f\n
+     * p-value = %.2e\n
+   - Females:\n
+     * W statistic = %.4f\n
+     * p-value = %.2e\n\n
+3. Head Circumference:\n
+   - Males:\n
+     * W statistic = %.4f\n
+     * p-value = %.2e\n
+   - Females:\n
+     * W statistic = %.4f\n
+     * p-value = %.2e\n",
+  shapiro_peso_m$statistic, shapiro_peso_m$p.value,
+  shapiro_peso_f$statistic, shapiro_peso_f$p.value,
+  shapiro_lunghezza_m$statistic, shapiro_lunghezza_m$p.value,
+  shapiro_lunghezza_f$statistic, shapiro_lunghezza_f$p.value,
+  shapiro_cranio_m$statistic, shapiro_cranio_m$p.value,
+  shapiro_cranio_f$statistic, shapiro_cranio_f$p.value
+))
+
+```
+
+Poiché i dati non seguono una distribuzione normale (p-value < 0.05 per tutti i test di Shapiro-Wilk), è stato applicato il test non parametrico Wilcoxon Rank Sum. Questo test è particolarmente utile quando i dati non soddisfano i requisiti di normalità richiesti dal test t.
+
+
+```{r}
+# Perform Wilcoxon Rank Sum Tests to compare distributions by sex
+wilcox_peso <- wilcox.test(data$Peso ~ data$Sesso)
+wilcox_lunghezza <- wilcox.test(data$Lunghezza ~ data$Sesso)
+wilcox_cranio <- wilcox.test(data$Cranio ~ data$Sesso)
+
+# Print test results using formatted output
+cat(sprintf(
+  "Results of the Wilcoxon Rank Sum Test:\n\n
+1. Weight:\n
+   - Test statistic (W) = %.0f\n
+   - p-value = %.2e\n
+2. Length:\n
+   - Test statistic (W) = %.0f\n
+   - p-value = %.2e\n
+3. Head circumference:\n
+   - Test statistic (W) = %.0f\n
+   - p-value = %.2e\n",
+   wilcox_peso$statistic, wilcox_peso$p.value,
+   wilcox_lunghezza$statistic, wilcox_lunghezza$p.value,
+   wilcox_cranio$statistic, wilcox_cranio$p.value
+))
+```
+
+
+I risultati del test mostrano che per tutte le variabili analizzate (peso, lunghezza e diametro cranico), il p-value è inferiore a 0.05, indicando differenze statisticamente significative tra maschi e femmine. Questo conferma che le misure antropometriche dei due gruppi differiscono in modo significativo, con valori medi generalmente più elevati per i maschi.
+
+
+### 2. Creazione, Selezione e Analisi del Modello di Regressione
+
+Come primo passo nella costruzione del modello di regressione, analizziamo la correlazione tra le variabili quantitative per identificare relazioni significative. Questo ci permetterà di selezionare i predittori più rilevanti e di valutare eventuali interazioni o relazioni non lineari.
+
+
+```{r}
+# Select numeric columns only
+numeric_data <- data[sapply(data, is.numeric)]
+
+# Compute the correlation matrix
+correlation_matrix <- round(cor(numeric_data, use = "complete.obs"), 2)
+
+# Convert the matrix into a data frame for kable
+correlation_df <- as.data.frame(correlation_matrix)
+
+# Display the matrix as a formatted table
+kable(correlation_df, 
+      align = "c", 
+      caption = "Correlation Matrix of Numerical Variables") %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed"), 
+                full_width = FALSE, 
+                position = "center")
+
+
+```
+
+```{r}
+# Basic scatterplot matrix
+# This graph shows pairwise scatterplots between all numerical variables,
+# allowing you to visually explore potential relationships or patterns.
+pairs(numeric_data, main = "Scatterplot Matrix")
+
+```
+
+
+Osservando la matrice di scatterplot e la matrice di correlazione, emergono alcune relazioni interessanti tra le variabili quantitative:
+
+- Gestazione e Peso: La correlazione positiva pari a 0.59 suggerisce che un aumento delle settimane di gestazione è associato a un aumento del peso neonatale. Tuttavia, la dispersione dei dati indica una possibile relazione non lineare, con una curvatura evidente per valori estremi.
+
+- Peso e Lunghezza: La correlazione significativa (0.80) mostra una forte relazione tra il peso e la lunghezza alla nascita. Anche in questo caso, si osserva una leggera curvatura nei dati, che potrebbe indicare una relazione non strettamente lineare
+
+- Peso e Cranio: La correlazione positiva pari a 0.70 evidenzia che il diametro cranico è un importante predittore del peso neonatale.
+
+Le relazioni osservate indicano che gestazione, lunghezza e diametro del cranio rappresentano ottimi predittori del peso neonatale. Tuttavia, l'andamento non lineare di alcune correlazioni suggerisce la necessità di considerare modelli più complessi durante la costruzione della regressione. Le altre variabili, invece, sembrano avere un impatto marginale e potrebbero non essere rilevanti per il modello predittivo.
+
+
+Sulla base di queste osservazioni, procediamo alla costruzione di un modello di regressione lineare completo. Includeremo tutte le variabili potenzialmente rilevanti, sulla base delle correlazioni osservate e delle relazioni biologiche plausibili con il peso neonatale.
+
+```{r}
+# Complete model including all potentially relevant variables
+complete_model <- lm(Peso ~ Anni.madre + N.gravidanze + Fumatrici + Gestazione + 
+                     Lunghezza + Cranio + Sesso + I(Lunghezza^2) + I(Gestazione^2), 
+                     data = data)
+
+# Model summary to evaluate coefficients and their statistical significance
+summary(complete_model)
+
+```
+
+Dal modello completo emergono subito alcuni aspetti chiave:
+
+Le variabili più significative nel modello risultano essere:
+
+- Numero di gravidanze
+- Settimane di gestazione
+- Lunghezza alla nascita
+- Sesso maschile
+- Diametro cranico
+- Effetto quadratico di lunghezza e gestazione
+
+Tutte queste variabili presentano un p-value estremamente basso, indicando un'elevata significatività statistica e un impatto rilevante sul peso alla nascita.
+
+Al contrario, variabili come fumo materno e età della madre risultano ininfluenti, con p-value elevati, suggerendo che non contribuiscono significativamente al modello.
+
+È importante notare che le variabili *Ospedale* e *Tipo.parto* sono state escluse a priori, poiché chiaramente non influenzano il peso del neonato alla nascita. Questa scelta si basa su considerazioni logiche e sull'assenza di un meccanismo plausibile che le colleghi direttamente al peso.
+
+Passiamo ora alla ricerca del modello ottimale utilizzando la procedura automatizzata stepAIC. Questo metodo, attraverso un processo iterativo, aggiunge e rimuove gradualmente le variabili dal modello completo, restituendoci automaticamente il modello finale che bilancia semplicità e accuratezza predittiva.
+
+```{r, message = FALSE, warning = FALSE}
+library(MASS)
+```
+
+```{r,echo = TRUE, results = "hide"}
+# AUTOMATED MODEL SELECTION WITH stepAIC()
+
+n <- nrow(data)  # Store the number of observations
+
+# Perform stepwise selection using both forward and backward direction
+# The criterion used is BIC (by setting k = log(n))
+stepwise_model <- stepAIC(complete_model, direction = "both", k = log(n))
+
+```
+
+```{r}
+# Display the summary of the selected model
+summary(stepwise_model)
+```
+Il modello finale, selezionato tramite la procedura automatizzata stepwise, mostra risultati significativi e coerenti.
+
+
+Le variabili più significative, con p-value molto bassi (p < 0.001), sono:
+
+- Numero di gravidanze: Ogni gravidanza precedente è associata a un aumento medio di 14.47 grammi nel peso del neonato, a parità delle altre condizioni.
+
+- Settimane di gestazione: Incremento medio di 336.2 grammi per settimana, con un rallentamento nelle settimane avanzate (effetto quadratico significativo)
+
+- Lunghezza alla nascita: Relazione curvilinea, con un impatto positivo che si riduce per lunghezze maggiori.
+
+- Sesso maschile:  I neonati maschi pesano mediamente 72.56 grammi in più rispetto alle femmine.
+
+- Diametro cranico: Incremento medio di 10.45 grammi per millimetro.
+
+Variabili come fumo materno e età della madre non sono risultate significative (p > 0.05) e sono state escluse dal modello.
+
+Il modello ha un R² pari a 0.7391, indicando che il 73.91% della variabilità osservata nel peso neonatale è spiegata dalle variabili incluse. L'Adjusted R² (0.7384) suggerisce un buon equilibrio tra complessità e capacità predittiva.
+
+La presenza di termini quadratici nel modello migliora la capacità di rappresentare relazioni non lineari, garantendo una descrizione più accurata delle dinamiche tra le variabili. Con un residual standard error di 268.7, il modello mostra una buona capacità di previsione.
+
+Per completare l'analisi, esaminiamo ora i residui del modello per verificare eventuali anomalie e violazioni delle assunzioni della regressione.
+
+Eseguiamo tre test statistici per verificare le principali assunzioni del modello di regressione lineare: omoschedasticità, indipendenza dei residui e normalità dei residui.
+
+```{r, , message = FALSE, warning = FALSE}
+library(lmtest)
+library(zoo)
+```
+
+```{r}
+# Breusch-Pagan test (to check for homoscedasticity)
+bp_test <- bptest(stepwise_model)
+
+# Durbin-Watson test (to check for independence of residuals)
+dw_test <- dwtest(stepwise_model)
+
+# Shapiro-Wilk test (to check for normality of residuals)
+shapiro_test <- shapiro.test(residuals(stepwise_model))
+
+# Display the results of diagnostic tests
+cat(sprintf(
+  "### Diagnostic Test Results\n
+1. **Homoscedasticity (Breusch-Pagan)**:\n
+   - BP Statistic: %.3f\n
+   - Degrees of freedom (df): %d\n
+   - p-value: %.2e\n\n
+2. **Independence of Residuals (Durbin-Watson)**:\n
+   - DW Statistic: %.4f\n
+   - p-value: %.4f\n\n
+3. **Normality of Residuals (Shapiro-Wilk)**:\n
+   - W Statistic: %.4f\n
+   - p-value: %.2e\n",
+  bp_test$statistic, bp_test$parameter, bp_test$p.value,
+  dw_test$statistic, dw_test$p.value,
+  shapiro_test$statistic, shapiro_test$p.value
+))
+
+```
+
+
+Osservando i risultati dei test statistici, emerge che le assunzioni di normalità e omoschedasticità non sono soddisfatte. Tuttavia, poiché questi test tendono a essere molto sensibili alla presenza di outlier, è opportuno procedere con un'analisi grafica dei residui. Questa analisi ci permetterà di determinare se le deviazioni osservate sono rilevanti dal punto di vista pratico, consentendo di formulare una valutazione più precisa e consapevole.
+
+Passiamo quindi all'esame dei grafici diagnostici relativi ai residui.
+
+```{r}
+# Diagnostic plots
+# This command sets the plotting area to show 4 plots (2 rows, 2 columns)
+par(mfrow = c(2, 2))
+
+# This function generates diagnostic plots for the linear regression model:
+# 1. Residuals vs Fitted
+# 2. Normal Q-Q plot
+# 3. Scale-Location
+# 4. Residuals vs Leverage
+plot(stepwise_model)
+
+```
+
+- Normalità dei residui:
+Il test di Shapiro-Wilk indica una deviazione significativa dalla normalità (p-value < 0.05). Tuttavia, il Q-Q plot mostra che i residui seguono approssimativamente una distribuzione normale, con lievi deviazioni nelle code. Questa violazione è accettabile per un modello con scopo predittivo, poiché la normalità è più critica per le inferenze statistiche che per la previsione.
+
+- Omoschedasticità:
+Il test di Breusch-Pagan rileva una leggera violazione dell'assunzione di varianza costante (p-value < 0.05). Tuttavia, il grafico Residuals vs Fitted non evidenzia pattern gravi o sistematici, indicando che l'impatto dell'eteroschedasticità è minimo e non compromette la capacità predittiva del modello.
+
+- Indipendenza dei residui:
+Il test di Durbin-Watson non evidenzia autocorrelazione significativa nei residui (p-value > 0.05), confermando l'indipendenza tra le osservazioni.
+
+
+Identifichiamo outlier, leverage elevati e punti influenti per verificare se distorcono il modello.
+
+```{r, echo=TRUE, message=FALSE, warning=FALSE, results="hide"}
+# Cook's Distance
+# Identifies influential observations that may strongly affect the regression model
+cook <- cooks.distance(stepwise_model)
+plot(cook, main = "Cook's Distance", ylab = "Cook's Distance", xlab = "Index")
+abline(h = 0.5, col = "red", lty = 2)  # Warning threshold line
+
+# Leverage values
+# Measures how far each observation is from the mean of the independent variables
+lev <- hatvalues(stepwise_model)
+plot(lev, main = "Leverage Values", ylab = "Leverage", xlab = "Index")
+abline(h = 2 * mean(lev), col = "red", lty = 2)  # Common threshold for high leverage
+
+# Studentized residuals
+# Helps identify outliers; values beyond ±2 are often considered unusual
+rstudent_res <- rstudent(stepwise_model)
+plot(rstudent_res, main = "Studentized Residuals", ylab = "Residuals", xlab = "Index")
+abline(h = c(-2, 2), col = "red", lty = 2)  # Threshold lines at ±2
+
+
+```
+
+- Distanza di Cook: Un'osservazione presenta una distanza di Cook elevata, ma il suo effetto sul modello è trascurabile.
+
+- Leverage: Alcune osservazioni mostrano leverage elevati, ma sono coerenti con il campione e non influenzano significativamente il modello.
+
+- Residui studentizzati: La maggior parte dei residui rientra nell'intervallo accettabile (-2, 2), con pochi outlier che non distorcono il modello in modo rilevante.
+
+
+Verifichiamo ora la multicollinearità tra le variabili indipendenti.
+
+
+```{r, , message = FALSE, warning = FALSE}
+library(car)
+```
+```{r}
+# Calculate the Variance Inflation Factor (VIF)
+# VIF helps detect multicollinearity by measuring how much the variance 
+# of a regression coefficient is inflated due to correlation with other predictors.
+vif(stepwise_model)
+```
+I valori elevati del VIF osservati per le variabili Gestazione e Lunghezza e i loro rispettivi termini quadratici sono dovuti alla naturale correlazione tra una variabile e il suo quadrato. Questo tipo di multicollinearità è strutturale e non rappresenta un problema significativo, poiché non altera la capacità del modello di catturare correttamente le relazioni tra le variabili e il peso alla nascita. Tuttavia, è importante tenerne conto nell'interpretazione dei coefficienti.
+Per quanto riguarda le altre variabili non c'è evidenza di multicollinearità problematica tra le variabili indipendenti del modello.
+
+
+Il modello ha un p-value complessivo estremamente basso (p < 2.2e-16), indicando che i regressori, nel loro insieme, spiegano in modo significativo la variabilità del peso alla nascita. Inoltre, il valore elevato di R² (0.7391) conferma che il modello cattura bene la relazione tra le variabili.
+
+
+**Conclusioni**
+
+- Il modello ha un R² pari a 0.7391, indicando che spiega il 73.91% della variabilità osservata nel peso neonatale.
+
+- Il p-value complessivo è estremamente significativo (p < 2.2e-16), confermando che i regressori spiegano in modo efficace la variabilità del peso.
+
+- Sebbene i test diagnostici abbiano rilevato lievi violazioni delle assunzioni, queste non compromettono l'adeguatezza del modello per scopi predittivi.
+
+Il modello finale risulta quindi robusto, con una buona capacità di previsione e una rappresentazione accurata delle relazioni tra le variabili. Eventuali violazioni minori non influenzano significativamente le sue performance.
+
+
+## Previsioni e Risultati
+
+Dopo aver validato il modello, passiamo all'applicazione pratica per verificare la sua capacità predittiva e la coerenza dei risultati.
+
+**Caso 1: Stima del peso di una neonata (madre alla terza gravidanza, 39 settimane di gestazione)**
+
+Stimiamo il peso di una neonata considerando i seguenti parametri:
+
+- Numero di gravidanze: 3
+- Settimane di gestazione: 39
+- Lunghezza: 500 mm (valore medio)
+- Diametro cranico: 340 mm (valore medio)
+- Sesso: Femmina
+
+Creiamo un data frame per la previsione e stimiamo il peso:
+
+```{r}
+# Create a new data frame with the values for which we want to make a prediction
+new_data <- data.frame(
+  N.gravidanze = 3,           # Number of pregnancies
+  Gestazione = 39,            # Weeks of gestation
+  Lunghezza = 500,            # Length of the newborn in mm
+  Cranio = 340,               # Head circumference in mm
+  Sesso = "F",                # Sex of the newborn ("F" for female)
+  I.Lunghezza.2 = 500^2,      # Squared term for length
+  I.Gestazione.2 = 39^2       # Squared term for gestation
+)
+
+# Use the trained model to predict the newborn's weight based on the input data
+predicted_weight <- predict(stepwise_model, newdata = new_data)
+
+# Print the predicted weight rounded to 2 decimal places
+cat("The predicted weight is:", round(predicted_weight, 2), "grams\n")
+
+```
+
+Il modello predice un peso di 3321 grammi, un valore coerente con la distribuzione osservata nel dataset.
+
+
+**Caso 2: Stima del peso di un neonato maschio (madre alla prima gravidanza, 35 settimane di gestazione)**
+
+Parametri considerati:
+
+- Numero di gravidanze: 1
+- Settimane di gestazione: 35
+- Lunghezza: 500 mm (valore medio)
+- Diametro cranico: 340 mm (valore medio)
+- Sesso: Maschio
+
+```{r}
+# Create a new data frame with the values of the predictors
+# Example: male baby, 35 weeks of gestation, length 500 mm, cranial diameter 340 mm
+new_data1 <- data.frame(
+  N.gravidanze = 1,
+  Gestazione = 35,
+  Lunghezza = 500,
+  Cranio = 340,
+  Sesso = "M",
+  I.Lunghezza.2 = 500^2,       # Squared length term
+  I.Gestazione.2 = 35^2        # Squared gestation term
+)
+
+# Predict the weight using the trained model
+predicted_weight1 <- predict(stepwise_model, newdata = new_data1)
+
+# Print the predicted weight, rounded to 2 decimal places
+cat("Predicted weight:", round(predicted_weight1, 2), "grams\n")
+```
+Il peso stimato è inferiore a quello del caso precedente, come atteso, a causa della minore durata della gravidanza. Questo riflette l'importanza cruciale delle settimane di gestazione nel determinare il peso alla nascita.
+
+
+**Caso 3: Stima del peso di una neonata (madre alla prima gravidanza, 35 settimane di gestazione)**
+Manteniamo gli stessi parametri del caso precedente, variando il sesso in femmina.
+
+```{r}
+new_data2 <- data.frame(
+  N.gravidanze = 1,
+  Gestazione = 35,
+  Lunghezza = 500,
+  Cranio = 340,
+  Sesso = "F",
+  I.Lunghezza.2 = 500^2,
+  I.Gestazione.2 = 35^2
+)
+predicted_weight2 <- predict(stepwise_model, newdata = new_data2)
+cat("Il peso previsto è:", round(predicted_weight2, 2), "grammi\n")
+
+```
+Il peso stimato per la neonata è inferiore di circa 72.5 grammi rispetto al neonato maschio, confermando l'influenza significativa del sesso sul peso alla nascita.
+
+
+**Caso 4: Stima del peso di una neonata (madre alla terza gravidanza, 42 settimane di gestazione)**
+Parametri considerati:
+
+- Numero di gravidanze: 3
+- Settimane di gestazione: 42
+- Lunghezza del neonato: 500 mm (valore medio)
+- Diametro cranico: 340 mm (valore medio)
+- Sesso: Femmina
+
+```{r}
+new_data3 <- data.frame(
+  N.gravidanze = 3,
+  Gestazione = 42,
+  Lunghezza = 500,
+  Cranio = 340,
+  Sesso = "F",
+  I.Lunghezza.2 = 500^2,
+  I.Gestazione.2 = 42^2
+)
+predicted_weight3 <- predict(stepwise_model, newdata = new_data3)
+cat("Il peso previsto è:", round(predicted_weight3, 2), "grammi\n")
+```
+L'aumento delle settimane di gestazione da 39 a 42 ha comportato un incremento del peso alla nascita di 68 grammi, riflettendo l'effetto positivo della gestazione prolungata sul peso.
+
+
+Le previsioni effettuate dimostrano che il modello è robusto e in grado di rappresentare correttamente le relazioni tra le variabili indipendenti e il peso alla nascita. Le differenze nei pesi stimati tra i casi analizzati sono coerenti con i coefficienti del modello e riflettono i fattori principali che influenzano il peso neonatale:
+
+- Settimane di gestazione: La durata della gravidanza ha un impatto cruciale sul peso.
+- Sesso: I neonati maschi pesano mediamente di più rispetto alle femmine.
+- Numero di gravidanze: Ogni gravidanza precedente contribuisce positivamente al peso.
+- Lunghezza e diametro cranico: Entrambe le variabili sono forti predittori del peso alla nascita.
+
+Questi risultati confermano la validità del modello per applicazioni predittive e pratiche, offrendo uno strumento affidabile per analisi cliniche e pianificazione neonatale.
+
+
+## Visualizzazioni
+
+Procediamo con la visualizzazione grafica delle relazioni più significative identificate dal modello. Questi grafici ci aiuteranno a comprendere meglio l'impatto delle variabili chiave sul peso previsto dei neonati.
+
+**1. Relazione tra settimane di gestazione, fumo e peso previsto**
+
+Esaminiamo come il numero di settimane di gestazione e il fumo influenzano il peso previsto alla nascita.
+
+```{r, , message = FALSE, warning = FALSE}
+library(ggplot2)
+```
+
+
+```{r}
+# Create the dataset for prediction
+new_data4 <- expand.grid(
+  Gestazione = seq(30, 42, by = 1),              # Range of gestational weeks
+  Fumatrici = c("Non Fumatrice", "Fumatrice"),   # Two groups: smokers and non-smokers
+  N.gravidanze = 3,                              # Fixed number of pregnancies
+  Lunghezza = 500,                               # Average length
+  Cranio = 340,                                  # Average cranial diameter
+  Sesso = "F"                                     # Fixed to female
+)
+
+# Add quadratic terms required by the model
+new_data4$I.Lunghezza.2 <- new_data4$Lunghezza^2
+new_data4$I.Gestazione.2 <- new_data4$Gestazione^2
+
+# Predict neonatal weight using the stepwise-selected model
+new_data4$predicted_weight4 <- predict(stepwise_model, newdata = new_data4)
+
+# Line plot showing the effect of gestational weeks and maternal smoking on predicted weight
+ggplot(new_data4, aes(x = Gestazione, y = predicted_weight4, color = Fumatrici)) +
+  geom_line(linewidth = 1.2) +
+  labs(
+    title = "Relationship between Gestational Age, Smoking and Predicted Weight",
+    x = "Gestational Weeks",
+    y = "Predicted Weight (grams)",
+    color = "Smoking Status"
+  ) +
+  theme_minimal()
+
+```
+
+
+Dal grafico emerge chiaramente che il peso previsto aumenta significativamente con il numero di settimane di gestazione. Tuttavia, l'effetto del fumo risulta trascurabile, come evidenziato dalla completa sovrapposizione delle curve tra fumatrici e non fumatrici. Questo risultato è coerente con l'insignificanza statistica del fumo emersa durante l'analisi del modello.
+
+
+**2. Relazione tra sesso, lunghezza e peso previsto**
+
+Esaminiamo ora l'effetto del sesso sulla relazione tra lunghezza alla nascita e peso previsto, mantenendo altre variabili costanti.
+
+```{r, , message = FALSE, warning = FALSE}
+library(ggplot2)
+```
+
+```{r}
+# Create an expanded dataset with combinations of gestational age and length
+heatmap_data <- expand.grid(
+  Gestazione = seq(30, 42, by = 1),   # Gestational weeks
+  Lunghezza = seq(450, 550, by = 5)   # Length in mm
+)
+
+# Add fixed values for the other variables required by the model
+heatmap_data$Fumatrici <- "Non Fumatrice"   # Set to non-smoker
+heatmap_data$N.gravidanze <- 2              # Fixed number of pregnancies
+heatmap_data$Cranio <- 340                  # Fixed cranial diameter
+heatmap_data$Sesso <- "M"                   # Set to male
+
+# Create quadratic terms required by the model
+heatmap_data$I.lunghezza.2 <- heatmap_data$Lunghezza^2
+heatmap_data$I.Gestazione.2 <- heatmap_data$Gestazione^2
+
+# Calculate predicted weight using the regression model
+heatmap_data$Predicted_Weight <- predict(stepwise_model, newdata = heatmap_data)
+
+# Create the heatmap using ggplot2
+ggplot(heatmap_data, aes(x = Gestazione, y = Lunghezza, fill = Predicted_Weight)) +
+  geom_tile() +
+  scale_fill_viridis_c(option = "cividis") +
+  labs(
+    title = "Relationship between Gestational Age, Length, and Predicted Weight",
+    x = "Gestational Weeks",
+    y = "Length (mm)",
+    fill = "Predicted Weight (grams)"
+  ) +
+  theme_minimal()
+
+```
+
+Il grafico mostra chiaramente una relazione positiva tra settimane di gestazione, lunghezza del neonato e peso previsto. All'aumentare di entrambe le variabili, il peso alla nascita cresce in modo significativo. Questo conferma il ruolo cruciale di queste due variabili come determinanti chiave del peso neonatale. Inoltre, la rappresentazione visiva evidenzia come il sesso del neonato influenzi moderatamente il peso, con i maschi che tendono ad avere un peso maggiore rispetto alle femmine a parità di condizioni.
+
+
+Le visualizzazioni confermano l'importanza di alcune variabili chiave identificate dal modello:
+
+- Settimane di gestazione: Un forte predittore del peso alla nascita, con un effetto positivo evidente.
+- Lunghezza del neonato: Contribuisce significativamente al peso previsto, mostrando una chiara relazione positiva.
+- Fumo materno: Non ha un impatto rilevante sul peso previsto, come evidenziato dalla sovrapposizione delle curve.
+- Sesso: Il sesso del neonato introduce una lieve differenza, con i maschi che tendono ad avere un peso leggermente superiore.
+
+Questi risultati sono coerenti con l'output del modello e rafforzano la sua validità per scopi predittivi e pratici.
+
+
+
+
